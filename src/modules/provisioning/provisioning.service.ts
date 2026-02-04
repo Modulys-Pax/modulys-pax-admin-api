@@ -4,6 +4,9 @@ import { adminPrisma } from '@modulys-pax/admin-database';
 import { TenantService } from '../tenant/tenant.service';
 import { Client } from 'pg';
 
+/** Código seguro para identificadores SQL: apenas [a-zA-Z0-9-], 1-63 chars. */
+const SAFE_TENANT_CODE_REGEX = /^[a-zA-Z0-9][a-zA-Z0-9-]{0,62}$/;
+
 @Injectable()
 export class ProvisioningService {
   constructor(
@@ -20,6 +23,11 @@ export class ProvisioningService {
 
     if (tenant.isProvisioned) {
       throw new BadRequestException('Tenant já foi provisionado');
+    }
+    if (!SAFE_TENANT_CODE_REGEX.test(tenant.code)) {
+      throw new BadRequestException(
+        'Código do tenant inválido para provisioning. Use apenas letras, números e hífen.',
+      );
     }
 
     // Configurações do banco admin (para criar novos bancos)

@@ -3,6 +3,17 @@ import { ConfigService } from '@nestjs/config';
 import { adminPrisma, TenantStatus, Prisma, Module } from '@modulys-pax/admin-database';
 import { Client } from 'pg';
 
+/** Código do tenant: apenas letras, números e hífen (1-63 chars). Usado em identificadores SQL. */
+const TENANT_CODE_REGEX = /^[a-zA-Z0-9][a-zA-Z0-9-]{0,62}$/;
+
+function validateTenantCode(code: string): void {
+  if (!code || !TENANT_CODE_REGEX.test(code)) {
+    throw new BadRequestException(
+      'Código do tenant deve ter 1 a 63 caracteres: apenas letras, números e hífen.',
+    );
+  }
+}
+
 @Injectable()
 export class TenantService {
   constructor(private readonly configService: ConfigService) {}
@@ -25,6 +36,8 @@ export class TenantService {
         OR: [{ code: tenantData.code }, { document: tenantData.document }],
       },
     });
+
+    validateTenantCode(tenantData.code);
 
     if (existing) {
       throw new ConflictException(

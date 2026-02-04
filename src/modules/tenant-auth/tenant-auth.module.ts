@@ -13,9 +13,9 @@ import { ProvisioningModule } from '../provisioning/provisioning.module';
     JwtModule.registerAsync({
       imports: [ConfigModule],
       useFactory: async (configService: ConfigService) => ({
-        secret: configService.get<string>('JWT_SECRET'),
+        secret: configService.get<string>('PAX_JWT_SECRET'),
         signOptions: {
-          expiresIn: configService.get<string>('JWT_TENANT_EXPIRATION', '8h'),
+          expiresIn: configService.get<string>('PAX_JWT_TENANT_EXPIRATION', '8h'),
         },
       }),
       inject: [ConfigService],

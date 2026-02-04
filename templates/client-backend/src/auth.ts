@@ -1,9 +1,13 @@
 import { Router, Request, Response } from 'express';
 import jwt from 'jsonwebtoken';
 
-const JWT_SECRET = process.env.MODULYS_PAX_JWT_SECRET || '';
-const ADMIN_API_URL = (process.env.MODULYS_PAX_ADMIN_API_URL || '').replace(/\/$/, '');
-const TENANT_CODE = process.env.MODULYS_PAX_TENANT_CODE || '';
+const rawJwtSecret = process.env.PAX_JWT_SECRET?.trim();
+if (!rawJwtSecret) {
+  throw new Error('PAX_JWT_SECRET is required. Set it in .env (same value as Admin API).');
+}
+const JWT_SECRET = rawJwtSecret;
+const ADMIN_API_URL = (process.env.PAX_ADMIN_API_URL || '').replace(/\/$/, '');
+const TENANT_CODE = process.env.PAX_TENANT_CODE || '';
 
 export interface TenantPayload {
   sub: string;
@@ -54,7 +58,7 @@ authRouter.post('/login', async (req: Request, res: Response) => {
     return;
   }
   if (!ADMIN_API_URL || !TENANT_CODE) {
-    res.status(500).json({ message: 'Backend não configurado (ADMIN_API_URL / TENANT_CODE)' });
+    res.status(500).json({ message: 'Backend não configurado (PAX_ADMIN_API_URL / PAX_TENANT_CODE)' });
     return;
   }
   try {

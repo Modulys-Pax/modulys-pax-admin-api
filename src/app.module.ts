@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
+import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { AuthModule } from './modules/auth/auth.module';
 import { TenantModule } from './modules/tenant/tenant.module';
 import { PlanModule } from './modules/plan/plan.module';
@@ -21,6 +22,10 @@ import { HealthController } from './health.controller';
       isGlobal: true,
       envFilePath: '.env',
     }),
+    ThrottlerModule.forRoot([
+      { name: 'short', ttl: 60_000, limit: 30 },
+      { name: 'login', ttl: 60_000, limit: 10 },
+    ]),
     AuthModule,
     TenantModule,
     PlanModule,
@@ -38,6 +43,10 @@ import { HealthController } from './health.controller';
     {
       provide: APP_GUARD,
       useClass: JwtAuthGuard,
+    },
+    {
+      provide: APP_GUARD,
+      useClass: ThrottlerGuard,
     },
   ],
 })

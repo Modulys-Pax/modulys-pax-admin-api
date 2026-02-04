@@ -26,7 +26,7 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
     // Verifica Service Key para comunicação entre serviços
     const request = context.switchToHttp().getRequest();
     const serviceKey = request.headers['x-service-key'];
-    const validServiceKey = this.configService.get<string>('SERVICE_KEY');
+    const validServiceKey = this.configService.get<string>('PAX_SERVICE_KEY');
 
     if (serviceKey && validServiceKey && serviceKey === validServiceKey) {
       // Adiciona um usuário fictício para requests de serviço
