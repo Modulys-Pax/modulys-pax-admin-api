@@ -11,6 +11,7 @@ import { MigrationsModule } from './modules/migrations/migrations.module';
 import { WhatsAppModule } from './modules/whatsapp/whatsapp.module';
 import { TemplatesModule } from './modules/templates/templates.module';
 import { ProjectGeneratorModule } from './modules/project-generator/project-generator.module';
+import { TenantAuthModule } from './modules/tenant-auth/tenant-auth.module';
 import { JwtAuthGuard } from './modules/auth/jwt-auth.guard';
 import { HealthController } from './health.controller';
 
@@ -30,6 +31,7 @@ import { HealthController } from './health.controller';
     WhatsAppModule,
     TemplatesModule,
     ProjectGeneratorModule,
+    TenantAuthModule,
   ],
   controllers: [HealthController],
   providers: [
