@@ -2,6 +2,7 @@ import { Injectable, BadRequestException, NotFoundException } from '@nestjs/comm
 import { ConfigService } from '@nestjs/config';
 import { adminPrisma } from '@modulys-pax/admin-database';
 import { TenantService } from '../tenant/tenant.service';
+import { Client } from 'pg';
 import { execSync } from 'child_process';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -60,7 +61,71 @@ export class MigrationsService {
         message: standardResult,
       });
 
-      // 2. Aplica migrations de módulos customizados
+      // 2. Aplica migrations de módulos padrão com SQL opcional (ex: internal_chat)
+      const standardModules = tenant.modules.filter(
+        (tm: any) => tm.isEnabled && !tm.module.isCustom,
+      );
+
+      for (const tm of standardModules) {
+        const module = tm.module;
+        const migrationsDir = this.getStandardModuleMigrationsDir(module.code);
+
+        if (migrationsDir && fs.existsSync(migrationsDir)) {
+          const sqlFiles = fs.readdirSync(migrationsDir)
+            .filter((f) => f.endsWith('.sql'))
+            .sort();
+
+          if (sqlFiles.length > 0) {
+            console.log(`\n=== Aplicando migrations SQL do módulo padrão: ${module.name} (${module.code}) ===`);
+            try {
+              const sqlResult = await this.runStandardModuleSqlMigrations(connectionString, module.code);
+              results.push({
+                module: module.code,
+                type: 'standard',
+                success: true,
+                message: sqlResult,
+              });
+              await adminPrisma.tenantModule.update({
+                where: { id: tm.id },
+                data: {
+                  migrationsApplied: true,
+                  migrationsAppliedAt: new Date(),
+                  schemaVersion: module.version,
+                },
+              });
+            } catch (error: any) {
+              console.error(`Erro no módulo ${module.code}:`, error.message);
+              results.push({
+                module: module.code,
+                type: 'standard',
+                success: false,
+                message: error.message,
+              });
+            }
+          } else {
+            await adminPrisma.tenantModule.update({
+              where: { id: tm.id },
+              data: {
+                migrationsApplied: true,
+                migrationsAppliedAt: new Date(),
+                schemaVersion: module.version,
+              },
+            });
+          }
+        } else {
+          // Módulo padrão sem migrations SQL opcionais (ex: core) — já coberto pelo Prisma migrate acima
+          await adminPrisma.tenantModule.update({
+            where: { id: tm.id },
+            data: {
+              migrationsApplied: true,
+              migrationsAppliedAt: new Date(),
+              schemaVersion: tm.module.version,
+            },
+          });
+        }
+      }
+
+      // 3. Aplica migrations de módulos customizados
       const customModules = tenant.modules.filter(
         (tm: any) => tm.isEnabled && tm.module.isCustom && tm.module.modulePath,
       );
@@ -70,14 +135,10 @@ export class MigrationsService {
         console.log(`\n=== Aplicando migrations do módulo customizado: ${module.name} ===`);
         
         try {
-          // Resolve o caminho local do módulo
           const modulePath = this.resolveModulePath(module);
-          
-          // Define o caminho das migrations (padrão: prisma)
           const migrationsPath = module.migrationsPath || 'prisma';
           const fullMigrationsPath = path.join(modulePath, migrationsPath);
 
-          // Verifica se existe schema.prisma no caminho
           const schemaPath = path.join(fullMigrationsPath, 'schema.prisma');
           if (!fs.existsSync(schemaPath)) {
             console.log(`Schema não encontrado em ${schemaPath}, pulando módulo...`);
@@ -90,7 +151,6 @@ export class MigrationsService {
             continue;
           }
 
-          // Aplica migrations do módulo customizado
           const customResult = await this.runPrismaMigrate(fullMigrationsPath, connectionString);
           results.push({
             module: module.code,
@@ -99,7 +159,6 @@ export class MigrationsService {
             message: customResult,
           });
 
-          // Atualiza status do módulo customizado
           await adminPrisma.tenantModule.update({
             where: { id: tm.id },
             data: {
@@ -116,20 +175,6 @@ export class MigrationsService {
             type: 'custom',
             success: false,
             message: error.message,
-          });
-        }
-      }
-
-      // Atualiza status dos módulos padrão
-      for (const tm of tenant.modules) {
-        if (tm.isEnabled && !tm.module.isCustom) {
-          await adminPrisma.tenantModule.update({
-            where: { id: tm.id },
-            data: {
-              migrationsApplied: true,
-              migrationsAppliedAt: new Date(),
-              schemaVersion: tm.module.version,
-            },
           });
         }
       }
@@ -173,6 +218,53 @@ export class MigrationsService {
 
     console.log('Resultado:', result);
     return result;
+  }
+
+  /**
+   * Caminho das migrations SQL opcionais para módulos padrão (ex: internal_chat).
+   * Convenção: modulys-pax-database/prisma/module-migrations/<moduleCode>/
+   */
+  private getStandardModuleMigrationsDir(moduleCode: string): string {
+    return path.join(this.databaseProjectPath, 'prisma', 'module-migrations', moduleCode);
+  }
+
+  /**
+   * Executa os arquivos .sql do módulo padrão no banco do tenant.
+   * Usado quando o módulo está habilitado para o tenant (ex: internal_chat).
+   */
+  private async runStandardModuleSqlMigrations(
+    connectionString: string,
+    moduleCode: string,
+  ): Promise<string> {
+    const migrationsDir = this.getStandardModuleMigrationsDir(moduleCode);
+    if (!fs.existsSync(migrationsDir)) {
+      return 'Nenhum diretório de migrations encontrado';
+    }
+
+    const sqlFiles = fs.readdirSync(migrationsDir)
+      .filter((f) => f.endsWith('.sql'))
+      .sort();
+
+    if (sqlFiles.length === 0) {
+      return 'Nenhum arquivo .sql encontrado';
+    }
+
+    const client = new Client({ connectionString });
+    await client.connect();
+
+    try {
+      const executed: string[] = [];
+      for (const file of sqlFiles) {
+        const filePath = path.join(migrationsDir, file);
+        const sql = fs.readFileSync(filePath, 'utf-8');
+        await client.query(sql);
+        executed.push(file);
+        console.log(`Executado: ${file}`);
+      }
+      return `Arquivos aplicados: ${executed.join(', ')}`;
+    } finally {
+      await client.end().catch(() => {});
+    }
   }
 
   /**
@@ -332,11 +424,32 @@ export class MigrationsService {
           message: result,
         };
       } else {
-        // Módulo padrão - usa modulys-pax-database
-        // Os módulos padrão compartilham o mesmo schema, então aplicar uma vez aplica para todos
-        const result = await this.runPrismaMigrate(this.databaseProjectPath, connectionString);
+        // Módulo padrão: pode ter migrations SQL opcionais (ex: internal_chat) ou só core
+        const migrationsDir = this.getStandardModuleMigrationsDir(module.code);
 
-        // Atualiza status
+        if (migrationsDir && fs.existsSync(migrationsDir)) {
+          const sqlFiles = fs.readdirSync(migrationsDir).filter((f) => f.endsWith('.sql'));
+          if (sqlFiles.length > 0) {
+            const result = await this.runStandardModuleSqlMigrations(connectionString, module.code);
+            await adminPrisma.tenantModule.update({
+              where: { id: tenantModule.id },
+              data: {
+                migrationsApplied: true,
+                migrationsAppliedAt: new Date(),
+                schemaVersion: module.version,
+              },
+            });
+            return {
+              success: true,
+              module: module.code,
+              type: 'standard',
+              message: result,
+            };
+          }
+        }
+
+        // Módulo padrão sem SQL opcional — aplica migrations core (Prisma)
+        const result = await this.runPrismaMigrate(this.databaseProjectPath, connectionString);
         await adminPrisma.tenantModule.update({
           where: { id: tenantModule.id },
           data: {
@@ -345,7 +458,6 @@ export class MigrationsService {
             schemaVersion: module.version,
           },
         });
-
         return {
           success: true,
           module: module.code,
@@ -388,15 +500,20 @@ export class MigrationsService {
 
     console.log(`Aplicando ${pendingModules.length} migrations pendentes para tenant ${tenant.code}`);
 
-    // Primeiro aplica módulos padrão (se houver)
-    const standardModules = pendingModules.filter((tm: any) => !tm.module.isCustom);
-    if (standardModules.length > 0) {
+    // Primeiro aplica módulos padrão pendentes (core = Prisma; outros com SQL opcional = run SQL)
+    const standardPending = pendingModules.filter((tm: any) => !tm.module.isCustom);
+    const standardWithSql = standardPending.filter(
+      (tm: any) => this.getStandardModuleMigrationsDir(tm.module.code) && fs.existsSync(this.getStandardModuleMigrationsDir(tm.module.code)),
+    );
+    const standardWithoutSql = standardPending.filter(
+      (tm: any) => !standardWithSql.includes(tm),
+    );
+
+    if (standardWithoutSql.length > 0) {
       try {
-        console.log('Aplicando migrations padrão...');
-        const result = await this.runPrismaMigrate(this.databaseProjectPath, connectionString);
-        
-        // Atualiza todos os módulos padrão
-        for (const tm of standardModules) {
+        console.log('Aplicando migrations padrão (core)...');
+        await this.runPrismaMigrate(this.databaseProjectPath, connectionString);
+        for (const tm of standardWithoutSql) {
           await adminPrisma.tenantModule.update({
             where: { id: tm.id },
             data: {
@@ -405,22 +522,35 @@ export class MigrationsService {
               schemaVersion: tm.module.version,
             },
           });
-          results.push({
-            module: tm.module.code,
-            type: 'standard',
-            success: true,
-            message: 'Migrations aplicadas',
-          });
+          results.push({ module: tm.module.code, type: 'standard', success: true, message: 'Migrations aplicadas' });
         }
       } catch (error: any) {
-        for (const tm of standardModules) {
-          results.push({
-            module: tm.module.code,
-            type: 'standard',
-            success: false,
-            message: error.message,
-          });
+        for (const tm of standardWithoutSql) {
+          results.push({ module: tm.module.code, type: 'standard', success: false, message: error.message });
         }
+      }
+    }
+
+    for (const tm of standardWithSql) {
+      const module = tm.module;
+      const migrationsDir = this.getStandardModuleMigrationsDir(module.code);
+      if (!migrationsDir || !fs.existsSync(migrationsDir)) continue;
+      const sqlFiles = fs.readdirSync(migrationsDir).filter((f) => f.endsWith('.sql'));
+      if (sqlFiles.length === 0) continue;
+      try {
+        console.log(`Aplicando migrations SQL do módulo: ${module.code}`);
+        const msg = await this.runStandardModuleSqlMigrations(connectionString, module.code);
+        await adminPrisma.tenantModule.update({
+          where: { id: tm.id },
+          data: {
+            migrationsApplied: true,
+            migrationsAppliedAt: new Date(),
+            schemaVersion: module.version,
+          },
+        });
+        results.push({ module: module.code, type: 'standard', success: true, message: msg });
+      } catch (error: any) {
+        results.push({ module: module.code, type: 'standard', success: false, message: error.message });
       }
     }
 

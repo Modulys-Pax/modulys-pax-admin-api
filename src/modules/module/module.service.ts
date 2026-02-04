@@ -120,14 +120,21 @@ export class ModuleService {
   }
 
   async seed() {
-    // Seed apenas do módulo Core (único módulo real implementado)
+    // Módulos do sistema: core (obrigatório) e padrão (opcional, ex: internal_chat)
     const modules = [
-      { 
-        code: 'core', 
-        name: 'Core', 
-        description: 'Autenticação, usuários, empresa, filiais, permissões', 
-        isCore: true, 
-        isCustom: false 
+      {
+        code: 'core',
+        name: 'Core',
+        description: 'Autenticação, usuários, empresa, filiais, permissões',
+        isCore: true,
+        isCustom: false,
+      },
+      {
+        code: 'internal_chat',
+        name: 'Chat interno',
+        description: 'Chat interno entre colaboradores (canais e mensagens)',
+        isCore: false,
+        isCustom: false,
       },
     ];
 
@@ -139,11 +146,10 @@ export class ModuleService {
       });
     }
 
-    // Remove módulos fictícios antigos se existirem
+    // Remove módulos fictícios antigos se existirem (não remove internal_chat)
     await adminPrisma.module.deleteMany({
       where: {
         code: { in: ['hr', 'fleet', 'stock', 'financial', 'chat'] },
-        // Só deleta se não estiver em uso
         tenants: { none: { isEnabled: true } },
       },
     });

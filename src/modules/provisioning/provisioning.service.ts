@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import { Injectable, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { adminPrisma } from '@modulys-pax/admin-database';
 import { TenantService } from '../tenant/tenant.service';
@@ -202,19 +202,35 @@ export class ProvisioningService {
   }
 
   /**
-   * Retorna a connection string do tenant (para uso no projeto do cliente)
+   * Retorna a connection string do tenant.
+   * Se moduleCode for informado, exige que o tenant tenha o módulo habilitado e esteja ativo.
    */
-  async getConnectionString(tenantId: string) {
+  async getConnectionString(tenantId: string, moduleCode?: string) {
     const tenant = await this.tenantService.findById(tenantId);
 
     if (!tenant.isProvisioned) {
       throw new BadRequestException('Tenant ainda não foi provisionado');
     }
 
+    if (moduleCode) {
+      if (tenant.status !== 'ACTIVE' && tenant.status !== 'TRIAL') {
+        throw new ForbiddenException('Tenant não está ativo');
+      }
+      const hasModule = (tenant as any).modules?.some(
+        (tm: { module: { code: string }; isEnabled: boolean }) =>
+          tm.module.code === moduleCode && tm.isEnabled,
+      );
+      if (!hasModule) {
+        throw new ForbiddenException(`Módulo ${moduleCode} não está habilitado para este tenant`);
+      }
+    }
+
     const pass = this.decrypt(tenant.databasePass!);
+    const encodedPass = encodeURIComponent(pass);
+    const port = Number(tenant.databasePort) || 5432;
 
     return {
-      connectionString: `postgresql://${tenant.databaseUser}:${pass}@${tenant.databaseHost}:${tenant.databasePort}/${tenant.databaseName}?schema=public`,
+      connectionString: `postgresql://${tenant.databaseUser}:${encodedPass}@${tenant.databaseHost}:${port}/${tenant.databaseName}?schema=public`,
     };
   }
 
