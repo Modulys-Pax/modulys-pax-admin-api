@@ -9,6 +9,8 @@ import { SubscriptionModule } from './modules/subscription/subscription.module';
 import { ProvisioningModule } from './modules/provisioning/provisioning.module';
 import { MigrationsModule } from './modules/migrations/migrations.module';
 import { WhatsAppModule } from './modules/whatsapp/whatsapp.module';
+import { TemplatesModule } from './modules/templates/templates.module';
+import { ProjectGeneratorModule } from './modules/project-generator/project-generator.module';
 import { JwtAuthGuard } from './modules/auth/jwt-auth.guard';
 import { HealthController } from './health.controller';
 
@@ -26,6 +28,8 @@ import { HealthController } from './health.controller';
     ProvisioningModule,
     MigrationsModule,
     WhatsAppModule,
+    TemplatesModule,
+    ProjectGeneratorModule,
   ],
   controllers: [HealthController],
   providers: [
